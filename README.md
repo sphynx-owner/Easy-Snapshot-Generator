@@ -1,0 +1,2 @@
+# Easy Snapshot Generator
+
