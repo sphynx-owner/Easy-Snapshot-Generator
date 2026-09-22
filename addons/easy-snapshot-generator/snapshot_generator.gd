@@ -39,7 +39,7 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 		_snapshot_rect_updated()
 
 ## The global rect within which elements are rendered to the snapshot
-@export var snapshot_rect := Rect2i(-256, -256, 512, 512):
+@export var snapshot_rect: Rect2i = Rect2i(-256, -256, 512, 512):
 	set(value):
 		if snapshot_rect == value:
 			return
@@ -73,15 +73,15 @@ var _atlas_texture: RenderingDeviceTexture
 
 var _atlas_texture_uniform: RDUniform
 
-var proxies: Array[Node2D]
-
-var _current_frame := 0
+var _current_frame: int = 0
 
 var _snapshot_viewport: SubViewport
 
 var _viewport_uniform: RDUniform
 
 var _snapshot_camera: Camera2D
+
+var _proxies: Array[Node2D]
 
 var _snapshot_queued: bool = false
 
@@ -133,12 +133,12 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	for proxy in proxies:
+	for proxy in _proxies:
 		_snapshot_viewport.remove_child(proxy)
 		
 		proxy.queue_free()
 	
-	proxies = []
+	_proxies = []
 	
 	if _snapshot_queued:
 		_snapshot_queued = false
@@ -151,7 +151,7 @@ func _process(delta: float) -> void:
 				
 				child.queue_free()
 			
-			proxies.push_back(new_proxy)
+			_proxies.push_back(new_proxy)
 			
 			_snapshot_viewport.add_child(new_proxy)
 			
@@ -160,9 +160,13 @@ func _process(delta: float) -> void:
 		
 		_snapshot_camera.global_position = get_target_position()
 		
-		var generate_snapshot_callback: Callable = _render_thread_generate_snapshot.bind(_advance_frame_queued)
+		if _advance_frame_queued:
+			_advance_frame_queued = false
+			
+			_current_frame = (_current_frame + 1) % frame_count
 		
-		_advance_frame_queued = false
+		var generate_snapshot_callback: Callable = _render_thread_generate_snapshot.bind(_current_frame)
+		
 		
 		_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		
@@ -213,7 +217,10 @@ func _update_atlas_texture() -> void:
 	
 	_atlas_texture_uniform = EasyRenderingUtils.get_image_uniform(_atlas_texture.texture, 1)
 	
-	atlas_texture_2d.set_deferred("texture_rd_rid", _atlas_texture.texture)
+	# HACK @sphynx-owner: fixes invalid rid freeing errors
+	atlas_texture_2d.texture_rd_rid = RID()
+	
+	atlas_texture_2d.texture_rd_rid = _atlas_texture.texture
 
 
 func _update_atlas_frames():
@@ -225,10 +232,7 @@ func _update_atlas_frames():
 
 
 # returns the atlas frame that we rendered to
-func _render_thread_generate_snapshot(advance_frame: bool):
-	if advance_frame:
-		_current_frame = (_current_frame + 1) % frame_count
-	
+func _render_thread_generate_snapshot(current_frame: int):
 	EasyRenderingUtils.dispatch_stage(
 		_rd_instance,
 		_atlas_write_shader_stage,
@@ -246,7 +250,7 @@ func _render_thread_generate_snapshot(advance_frame: bool):
 		EasyRenderingUtils.get_push_constants([], [
 			atlas_dimensions.x,
 			atlas_dimensions.y,
-			_current_frame,
+			current_frame,
 			0,
 		]),
 		EasyRenderingUtils.get_groups_count(Vector3i(snapshot_size.x, snapshot_size.y, 1), Vector3i(16, 16, 1))
