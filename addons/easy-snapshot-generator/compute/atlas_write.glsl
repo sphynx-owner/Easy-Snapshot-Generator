@@ -32,5 +32,5 @@ void main()
 
 	ivec2 uvi_offset = atlas_offset * render_size;
 
-	imageStore(output_color_image, uvi, texelFetch(snapshot, uvi, 0));
+	imageStore(output_color_image, uvi + uvi_offset, texelFetch(snapshot, uvi, 0));
 }

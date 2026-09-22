@@ -158,7 +158,7 @@ func _process(delta: float) -> void:
 			new_proxy.global_transform = target.global_transform
 			new_proxy.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		
-		_snapshot_camera.global_position = pivot_node.global_position
+		_snapshot_camera.global_position = get_target_position()
 		
 		var generate_snapshot_callback: Callable = _render_thread_generate_snapshot.bind(_advance_frame_queued)
 		
@@ -174,6 +174,10 @@ func _process(delta: float) -> void:
 func queue_snapshot(advance_frame: bool = true) -> void:
 	_snapshot_queued = true
 	_advance_frame_queued = advance_frame
+
+
+func get_target_position() -> Vector2:
+	return pivot_node.global_position
 
 
 func _atlas_dimensions_updated() -> void:
@@ -209,7 +213,7 @@ func _update_atlas_texture() -> void:
 	
 	_atlas_texture_uniform = EasyRenderingUtils.get_image_uniform(_atlas_texture.texture, 1)
 	
-	atlas_texture_2d.texture_rd_rid = _atlas_texture.texture
+	atlas_texture_2d.set_deferred("texture_rd_rid", _atlas_texture.texture)
 
 
 func _update_atlas_frames():
@@ -230,7 +234,12 @@ func _render_thread_generate_snapshot(advance_frame: bool):
 		_atlas_write_shader_stage,
 		[
 			[
-				_viewport_uniform,
+				EasyRenderingUtils.get_sampler_uniform(
+					_rd_instance,
+					RenderingServer.texture_get_rd_texture(_snapshot_viewport.get_texture().get_rid()),
+					0,
+					false
+				),
 				_atlas_texture_uniform
 			]
 		],
