@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://d3bdbnal0s468"
+path="res://.godot/imported/atlas_write.glsl-9aa9ed2618da42335d8c80938fbd447d.res"
+
+[deps]
+
+source_file="res://addons/easy-snapshot-generator/compute/atlas_write.glsl"
+dest_files=["res://.godot/imported/atlas_write.glsl-9aa9ed2618da42335d8c80938fbd447d.res"]
+
+[params]
+

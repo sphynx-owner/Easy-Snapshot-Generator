@@ -1,2 +1,0 @@
-class_name SnapshotTexture
-extends Texture2DRD
