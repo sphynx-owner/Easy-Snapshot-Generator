@@ -158,12 +158,10 @@ func _process(delta: float) -> void:
 			new_proxy.global_transform = target.global_transform
 			new_proxy.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		
-		_snapshot_camera.global_position = get_target_position()
+		_snapshot_camera.global_position = get_pivot_position()
 		
 		if _advance_frame_queued:
 			_advance_frame_queued = false
-			
-			_current_frame = (_current_frame + 1) % frame_count
 		
 		var generate_snapshot_callback: Callable = _render_thread_generate_snapshot.bind(_current_frame)
 		
@@ -177,10 +175,13 @@ func _process(delta: float) -> void:
 
 func queue_snapshot(advance_frame: bool = true) -> void:
 	_snapshot_queued = true
-	_advance_frame_queued = advance_frame
+	
+	if advance_frame and !_advance_frame_queued:
+		_advance_frame_queued = true
+		_current_frame = (_current_frame + 1) % frame_count
 
 
-func get_target_position() -> Vector2:
+func get_pivot_position() -> Vector2:
 	return pivot_node.global_position
 
 
