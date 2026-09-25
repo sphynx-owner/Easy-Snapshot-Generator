@@ -77,9 +77,11 @@ var _current_frame: int = 0
 
 var _snapshot_viewport: SubViewport
 
-var _viewport_uniform: RDUniform
-
 var _snapshot_camera: Camera2D
+
+var _snapshot_environment: WorldEnvironment
+
+var _socket_compositor: SocketCompositorEffect
 
 var _proxies: Array[Node2D]
 
@@ -108,12 +110,9 @@ func _ready() -> void:
 	
 	_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	
-	_viewport_uniform = EasyRenderingUtils.get_sampler_uniform(
-		_rd_instance,
-		RenderingServer.texture_get_rd_texture(_snapshot_viewport.get_texture().get_rid()),
-		0,
-		false
-	)
+	# HACK @sphynx-owner: necessary so that the socket compositor is dedicated to that viewport only,
+	# otherwise triggered for the root viewport as well.
+	_snapshot_viewport.own_world_3d = true
 	
 	add_child(_snapshot_viewport)
 	
@@ -126,6 +125,20 @@ func _ready() -> void:
 	_snapshot_viewport.add_child(_snapshot_camera)
 	
 	atlas_texture_2d = Texture2DRD.new()
+	
+	_snapshot_environment = WorldEnvironment.new()
+	
+	_snapshot_environment.environment = Environment.new()
+	
+	_snapshot_environment.environment.background_mode = Environment.BG_CANVAS
+	
+	_snapshot_environment.compositor = Compositor.new()
+	
+	_socket_compositor = SocketCompositorEffect.new()
+	
+	_snapshot_environment.compositor.compositor_effects = [_socket_compositor]
+	
+	_snapshot_viewport.add_child(_snapshot_environment)
 	
 	_update_viewport()
 	_update_atlas_texture()
@@ -160,17 +173,9 @@ func _process(delta: float) -> void:
 		
 		_snapshot_camera.global_position = get_pivot_position()
 		
-		if _advance_frame_queued:
-			_advance_frame_queued = false
-		
-		var generate_snapshot_callback: Callable = _render_thread_generate_snapshot.bind(_current_frame)
-		
-		
 		_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		
-		await RenderingServer.frame_post_draw
-		
-		RenderingServer.call_on_render_thread(generate_snapshot_callback)
+		_socket_compositor.render_callback.connect(_on_compositor_render_callback, CONNECT_ONE_SHOT)
 
 
 func queue_snapshot(advance_frame: bool = true) -> void:
@@ -232,8 +237,20 @@ func _update_atlas_frames():
 		_current_frame = 0
 
 
+func _on_compositor_render_callback(
+	render_size: Vector2i,
+	rd_instance: RenderingDeviceInstance,
+	scene_buffers: RenderSceneBuffersRD,
+	scene_data: RenderSceneDataRD
+) -> void:
+	if _advance_frame_queued:
+		_advance_frame_queued = false
+	
+	_render_thread_generate_snapshot(render_size, scene_buffers, _current_frame)
+
+
 # returns the atlas frame that we rendered to
-func _render_thread_generate_snapshot(current_frame: int):
+func _render_thread_generate_snapshot(render_size: Vector2i, scene_buffers: RenderSceneBuffersRD, current_frame: int):
 	EasyRenderingUtils.dispatch_stage(
 		_rd_instance,
 		_atlas_write_shader_stage,
@@ -241,7 +258,7 @@ func _render_thread_generate_snapshot(current_frame: int):
 			[
 				EasyRenderingUtils.get_sampler_uniform(
 					_rd_instance,
-					RenderingServer.texture_get_rd_texture(_snapshot_viewport.get_texture().get_rid()),
+					scene_buffers.get_color_layer(0, false),
 					0,
 					false
 				),
