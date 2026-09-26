@@ -106,6 +106,8 @@ func _ready() -> void:
 	
 	_snapshot_viewport = SubViewport.new()
 	
+	_snapshot_viewport.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
+	
 	_snapshot_viewport.transparent_bg = true
 	
 	_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -207,6 +209,8 @@ func _update_viewport() -> void:
 		return
 	
 	_snapshot_viewport.size = snapshot_size
+	
+	_snapshot_camera.zoom = Vector2(snapshot_resolution_scale, snapshot_resolution_scale)
 
 
 func _update_atlas_texture() -> void:
