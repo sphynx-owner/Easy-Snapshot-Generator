@@ -39,7 +39,7 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 		_snapshot_rect_updated()
 
 ## The global rect within which elements are rendered to the snapshot
-@export var snapshot_rect: Rect2i = Rect2i(-256, -256, 512, 512):
+@export_storage var snapshot_rect: Rect2i = Rect2i(-256, -256, 512, 512):
 	set(value):
 		if snapshot_rect == value:
 			return
@@ -196,6 +196,8 @@ func _process(delta: float) -> void:
 			if Engine.is_editor_hint():
 				new_proxy.global_position -= get_pivot_position()
 				new_proxy.global_position += Vector2(snapshot_rect.size) / 2.0 - Vector2(snapshot_rect.get_center())
+				new_proxy.global_position *= snapshot_resolution_scale
+				new_proxy.scale *= snapshot_resolution_scale
 			
 			new_proxy.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		
