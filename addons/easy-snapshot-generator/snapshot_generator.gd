@@ -99,6 +99,16 @@ func _notification(what: int) -> void:
 
 
 func _ready() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	
+	if Engine.is_editor_hint():
+		var new_gizmo: SnapshotRectGizmo = SnapshotRectGizmo.new()
+		
+		new_gizmo.node = self
+		
+		add_child(new_gizmo)
+	
 	if !_rd_instance:
 		_rd_instance = RenderingDeviceInstance.get_instance()
 		
@@ -126,6 +136,8 @@ func _ready() -> void:
 	
 	_snapshot_viewport.add_child(_snapshot_camera)
 	
+	_snapshot_camera.make_current()
+	
 	atlas_texture_2d = Texture2DRD.new()
 	
 	_snapshot_environment = WorldEnvironment.new()
@@ -148,6 +160,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	
 	for proxy in _proxies:
 		_snapshot_viewport.remove_child(proxy)
 		
@@ -159,6 +174,9 @@ func _process(delta: float) -> void:
 		_snapshot_queued = false
 		
 		for target in targets:
+			if !target:
+				continue
+			
 			var new_proxy: Node = target.duplicate(0)
 			
 			for child in new_proxy.get_children():
@@ -171,6 +189,14 @@ func _process(delta: float) -> void:
 			_snapshot_viewport.add_child(new_proxy)
 			
 			new_proxy.global_transform = target.global_transform
+			
+			# HACK @sphynx-owner: For some reason in the editor the camera position does not update no matter what
+			# I try. I don't know what the solution is for it but this is the workaround. If the camera won't come
+			# to the target, the targets would come to the camera.
+			if Engine.is_editor_hint():
+				new_proxy.global_position -= get_pivot_position()
+				new_proxy.global_position += Vector2(snapshot_rect.size) / 2.0 - Vector2(snapshot_rect.get_center())
+			
 			new_proxy.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		
 		_snapshot_camera.global_position = get_pivot_position()
@@ -183,13 +209,16 @@ func _process(delta: float) -> void:
 func queue_snapshot(advance_frame: bool = true) -> void:
 	_snapshot_queued = true
 	
-	if advance_frame and !_advance_frame_queued:
+	if advance_frame:
 		_advance_frame_queued = true
-		_current_frame = (_current_frame + 1) % frame_count
 
 
 func get_pivot_position() -> Vector2:
 	return pivot_node.global_position
+
+
+func get_current_frame(offset: int = 0) -> int:
+	return (_current_frame + offset) % frame_count
 
 
 func _atlas_dimensions_updated() -> void:
@@ -247,10 +276,11 @@ func _on_compositor_render_callback(
 	scene_buffers: RenderSceneBuffersRD,
 	scene_data: RenderSceneDataRD
 ) -> void:
+	_render_thread_generate_snapshot(render_size, scene_buffers, _current_frame)
+	
 	if _advance_frame_queued:
 		_advance_frame_queued = false
-	
-	_render_thread_generate_snapshot(render_size, scene_buffers, _current_frame)
+		_current_frame = (_current_frame + 1) % frame_count
 
 
 # returns the atlas frame that we rendered to
