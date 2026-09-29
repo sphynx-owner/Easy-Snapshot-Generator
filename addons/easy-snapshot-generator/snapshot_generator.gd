@@ -220,7 +220,11 @@ func get_pivot_position() -> Vector2:
 
 
 func get_current_frame(offset: int = 0) -> int:
-	return (_current_frame + offset) % frame_count
+	return (_current_frame + offset + frame_count) % frame_count
+
+
+func get_future_latest_frame(offset: int = 0) -> int:
+	return (_current_frame + offset + int(_advance_frame_queued) + frame_count) % frame_count
 
 
 func _atlas_dimensions_updated() -> void:
@@ -282,7 +286,7 @@ func _on_compositor_render_callback(
 	
 	if _advance_frame_queued:
 		_advance_frame_queued = false
-		_current_frame = (_current_frame + 1) % frame_count
+		_current_frame = (_current_frame + 1 + frame_count) % frame_count
 
 
 # returns the atlas frame that we rendered to
