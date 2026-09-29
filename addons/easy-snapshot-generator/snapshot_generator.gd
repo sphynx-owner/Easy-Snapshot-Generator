@@ -39,7 +39,7 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 		_snapshot_rect_updated()
 
 ## The global rect within which elements are rendered to the snapshot
-@export_storage var snapshot_rect: Rect2i = Rect2i(-256, -256, 512, 512):
+@export var snapshot_rect: Rect2i = Rect2i(-256, -256, 512, 512):
 	set(value):
 		if snapshot_rect == value:
 			return
@@ -47,6 +47,8 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 		snapshot_rect = value
 		
 		_snapshot_rect_updated()
+
+@export var max_refresh_rate: int = 60
 
 static var _rd_instance: RenderingDeviceInstance
 
@@ -88,6 +90,8 @@ var _proxies: Array[Node2D]
 var _snapshot_queued: bool = false
 
 var _advance_frame_queued: bool = false
+
+var _snapshot_refresh_time_buffer: float = 0.0
 
 
 func _notification(what: int) -> void:
@@ -170,8 +174,12 @@ func _process(delta: float) -> void:
 	
 	_proxies = []
 	
-	if _snapshot_queued:
+	_snapshot_refresh_time_buffer += delta
+	
+	if _snapshot_queued and _snapshot_refresh_time_buffer > (1.0 / max_refresh_rate):
 		_snapshot_queued = false
+		
+		_snapshot_refresh_time_buffer = 0.0
 		
 		for target in targets:
 			if !target:
