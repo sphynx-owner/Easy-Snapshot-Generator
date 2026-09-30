@@ -48,8 +48,6 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 		
 		_snapshot_rect_updated()
 
-@export var max_refresh_rate: int = 60
-
 static var _rd_instance: RenderingDeviceInstance
 
 static var _atlas_write_shader_stage: CompiledShaderStage
@@ -90,8 +88,6 @@ var _proxies: Array[Node2D]
 var _snapshot_queued: bool = false
 
 var _advance_frame_queued: bool = false
-
-var _snapshot_refresh_time_buffer: float = 0.0
 
 
 func _notification(what: int) -> void:
@@ -174,12 +170,8 @@ func _process(delta: float) -> void:
 	
 	_proxies = []
 	
-	_snapshot_refresh_time_buffer += delta
-	
-	if _snapshot_queued and _snapshot_refresh_time_buffer > (1.0 / max_refresh_rate):
+	if _snapshot_queued:
 		_snapshot_queued = false
-		
-		_snapshot_refresh_time_buffer = 0.0
 		
 		for target in targets:
 			if !target:
@@ -227,12 +219,16 @@ func get_pivot_position() -> Vector2:
 	return pivot_node.global_position
 
 
-func get_current_frame(offset: int = 0) -> int:
+func get_naive_current_frame(offset: int = 0) -> int:
 	return (_current_frame + offset + frame_count) % frame_count
 
 
-func get_future_latest_frame(offset: int = 0) -> int:
+func get_current_frame(offset: int = 0) -> int:
 	return (_current_frame + offset + int(_advance_frame_queued) + frame_count) % frame_count
+
+
+func get_latest_frame() -> int:
+	return get_current_frame(-1)
 
 
 func _atlas_dimensions_updated() -> void:
