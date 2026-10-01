@@ -216,6 +216,9 @@ func queue_snapshot(advance_frame: bool = true) -> void:
 
 
 func get_pivot_position() -> Vector2:
+	if !pivot_node:
+		return Vector2.ZERO
+	
 	return pivot_node.global_position
 
 
