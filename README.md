@@ -7,3 +7,5 @@ This addon contains a **SnapshotGenerator** class which can easily generate snap
 1. Install the [easy compositor addon](https://github.com/sphynx-owner/Easy-Compositor-Addon).
 
 2. Download the latest release, and move the contents of `addons` into your project's addons folder.
+
+3. Go to **Project**->**Project Settings**->**Plugins** and ensure that the *Easy Snapshot Generator* plugin is enabled.
