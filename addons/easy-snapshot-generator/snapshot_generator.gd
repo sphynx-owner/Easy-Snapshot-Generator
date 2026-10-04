@@ -177,7 +177,15 @@ func _process(delta: float) -> void:
 			if !target:
 				continue
 			
-			var new_proxy: Node = target.duplicate(0)
+			# HACK @sphynx-owner: set the owner to null temporarily to avoid runtime
+			# errors regarding invalid owner on the duplicated nodes.
+			var temp_owner: Node = target.owner
+			
+			target.owner = null
+			
+			var new_proxy: Node = target.duplicate(16)
+			
+			target.owner = temp_owner
 			
 			for child in new_proxy.get_children():
 				new_proxy.remove_child(child)
@@ -201,7 +209,7 @@ func _process(delta: float) -> void:
 			
 			new_proxy.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		
-		_snapshot_camera.global_position = get_pivot_position()
+		_snapshot_camera.global_position = get_pivot_position() + Vector2(snapshot_rect.get_center())
 		
 		_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		
