@@ -213,7 +213,9 @@ func _process(delta: float) -> void:
 		
 		_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		
-		_socket_compositor.render_callback.connect(_on_compositor_render_callback, CONNECT_ONE_SHOT)
+		# HACK @sphynx-owner: can happen in the editor for example when not in the 2D editor view. 
+		if !_socket_compositor.render_callback.is_connected(_on_compositor_render_callback):
+			_socket_compositor.render_callback.connect(_on_compositor_render_callback, CONNECT_ONE_SHOT)
 
 
 func queue_snapshot(advance_frame: bool = true) -> void:
