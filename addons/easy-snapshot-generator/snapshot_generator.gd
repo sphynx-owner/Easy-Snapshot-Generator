@@ -52,10 +52,6 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 		
 		_snapshot_rect_updated()
 
-static var _rd_instance: RenderingDeviceInstance
-
-static var _atlas_write_shader_stage: CompiledShaderStage
-
 var frame_count: int:
 	get():
 		return atlas_dimensions.x * atlas_dimensions.y
@@ -87,6 +83,12 @@ var _snapshot_queued: bool = false
 
 var _advance_frame_queued: bool = false
 
+static var _rd_instance: RenderingDeviceInstance
+
+static var _atlas_write_shader_stage: CompiledShaderStage
+
+static var snapshot_generator_count: int = 0
+
 static var scenario: RID
 
 static var compositor: RID
@@ -99,8 +101,14 @@ static var currently_active_generators: Array[SnapshotGenerator]
 
 static var current_generator_index: int
 
+var _waiting_on_render = false
 
-static func _static_init() -> void:
+
+static func _setup_scenario() -> void:
+	_rd_instance = RenderingDeviceInstance.get_instance()
+	
+	_atlas_write_shader_stage = CompiledShaderStage.new(_rd_instance, load(ATLAS_WRITE_SHADER_PATH))
+	
 	socket_compositor_effect = SocketCompositorEffect.new()
 	
 	socket_compositor_effect.effect_callback_type = CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
@@ -118,6 +126,29 @@ static func _static_init() -> void:
 	RenderingServer.environment_set_background(environment, RenderingServer.ENV_BG_CANVAS)
 	
 	RenderingServer.scenario_set_environment(scenario, environment)
+	
+	socket_compositor_effect.render_callback.connect(_on_render_callback_2)
+
+
+static func _teardown_scenario() -> void:
+	# Must be set to null otherwise hold references and prevent freeind of
+	# rids before shutdown
+	_atlas_write_shader_stage = null
+	
+	_rd_instance = null
+	
+	if socket_compositor_effect:
+		if socket_compositor_effect.get_rid().is_valid():
+			RenderingServer.free_rid(socket_compositor_effect.get_rid())
+	
+	if compositor.is_valid():
+		RenderingServer.free_rid(compositor)
+	
+	if environment.is_valid():
+		RenderingServer.free_rid(environment)
+	
+	if scenario.is_valid():
+		RenderingServer.free_rid(scenario)
 
 
 static func _pre_draw_callback() -> void:
@@ -127,11 +158,24 @@ static func _pre_draw_callback() -> void:
 	
 	var all_snapshot_generators: Array[SnapshotGenerator] = _collect_all_snapshot_generators()
 	
+	print("pre draw")
+	
 	for snapshot_generator in all_snapshot_generators:
-		if snapshot_generator._snapshot_viewport.render_target_update_mode == SubViewport.UPDATE_ONCE:
+		if snapshot_generator._waiting_on_render:
+			print(RenderingServer.viewport_get_render_target(snapshot_generator._snapshot_viewport.get_viewport_rid()))
 			currently_active_generators.append(snapshot_generator)
 	
-	_queue_next_snapshot_callbacks()
+	print("render callbacks")
+	#_queue_next_snapshot_callbacks()
+
+
+static func _on_render_callback_2(
+	render_size: Vector2i,
+	rd_instance: RenderingDeviceInstance,
+	scene_buffers: RenderSceneBuffersRD,
+	scene_data: RenderSceneDataRD,
+) -> void:
+	print(scene_buffers.get_render_target())
 
 
 static func _render_callback(
@@ -141,10 +185,17 @@ static func _render_callback(
 	scene_data: RenderSceneDataRD,
 	snapshot_generator: SnapshotGenerator
 ) -> void:
-	assert(
-		scene_buffers.get_render_target() == RenderingServer.viewport_get_render_target(snapshot_generator._snapshot_viewport.get_Viewport_rid()),
-		"something went wrong, the current render target of the compositor callback does not match the predicted snapshot"
-	)
+	if scene_buffers.get_render_target() != RenderingServer.viewport_get_render_target(snapshot_generator._snapshot_viewport.get_viewport_rid()):
+		push_error(
+			"next render target is ",
+			scene_buffers.get_render_target(),
+			" but the predicted render target is ",
+			RenderingServer.viewport_get_render_target(snapshot_generator._snapshot_viewport.get_viewport_rid())
+		)
+		
+		_queue_next_snapshot_callbacks()
+		
+		return
 	
 	snapshot_generator._render(render_size, rd_instance, scene_buffers, scene_data)
 	
@@ -171,9 +222,27 @@ static func _collect_all_snapshot_generators(root: Node = Engine.get_main_loop()
 		ret.append_array(_collect_all_snapshot_generators(child))
 	
 	if root is SnapshotGenerator:
-		ret = [root]
+		ret.push_back(root)
 	
 	return ret
+
+
+static func _snapshot_generator_created() -> void:
+	snapshot_generator_count += 1
+	
+	if snapshot_generator_count == 1:
+		_setup_scenario()
+
+
+static func _snapshot_generator_destroyed() -> void:
+	snapshot_generator_count -= 1
+	
+	if snapshot_generator_count == 0:
+		_teardown_scenario()
+
+
+func _init() -> void:
+	_snapshot_generator_created()
 
 
 func _notification(what: int) -> void:
@@ -182,6 +251,8 @@ func _notification(what: int) -> void:
 	# this we ensure no dangling rids are left.
 	if what == NOTIFICATION_PREDELETE:
 		atlas_texture_2d.texture_rd_rid = RID()
+		
+		_snapshot_generator_destroyed()
 
 
 func _ready() -> void:
@@ -195,11 +266,6 @@ func _ready() -> void:
 		
 		add_child(new_gizmo)
 	
-	if !_rd_instance:
-		_rd_instance = RenderingDeviceInstance.get_instance()
-		
-		_atlas_write_shader_stage = CompiledShaderStage.new(_rd_instance, load(ATLAS_WRITE_SHADER_PATH))
-	
 	_snapshot_viewport = SubViewport.new()
 	
 	_snapshot_viewport.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
@@ -208,11 +274,9 @@ func _ready() -> void:
 	
 	_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	
-	_snapshot_viewport.canvas_cull_mask = 1 << (2 - 1)
+	_snapshot_viewport.canvas_cull_mask = 1 << (SNAPSHOT_VISIBILITY_LAYER_BIT - 1)
 	
 	_snapshot_viewport.world_2d = get_viewport().world_2d
-	
-	get_viewport().canvas_cull_mask = ~(1 << (2 - 1))
 	
 	add_child(_snapshot_viewport)
 	
@@ -244,8 +308,10 @@ func _process(delta: float) -> void:
 		
 		_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		
+		_waiting_on_render = true
+		
 		if !RenderingServer.frame_pre_draw.is_connected(_pre_draw_callback):
-			RenderingServer.frame_pre_draw.connect(_pre_draw_callback)
+			RenderingServer.frame_pre_draw.connect(_pre_draw_callback, CONNECT_ONE_SHOT)
 
 
 func queue_snapshot(advance_frame: bool = true) -> void:
@@ -324,6 +390,8 @@ func _update_atlas_frames():
 
 
 func _pre_render_setup() -> void:
+	_waiting_on_render = false
+	
 	for target in targets:
 		if !target:
 			continue
@@ -335,7 +403,7 @@ func _pre_render_setup() -> void:
 			"physics_interpolation_mode": target.physics_interpolation_mode
 		})
 		
-		target.set_visibility_layer_bit(SNAPSHOT_VISIBILITY_LAYER_BIT, true)
+		target.set_visibility_layer_bit(SNAPSHOT_VISIBILITY_LAYER_BIT - 1, true)
 		
 		var temp_global_transform: Transform2D = target.global_transform
 		
