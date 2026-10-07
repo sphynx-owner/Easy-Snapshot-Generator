@@ -2,6 +2,10 @@
 class_name SnapshotGenerator
 extends Node
 
+const PAST_STATE_META_KEY: StringName = &"snapshot_generator_target_past_state"
+
+const SNAPSHOT_VISIBILITY_LAYER_BIT: int = 2
+
 const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/compute/atlas_write.glsl"
 
 @export var targets: Array[Node2D]
@@ -79,15 +83,97 @@ var _snapshot_viewport: SubViewport
 
 var _snapshot_camera: Camera2D
 
-var _snapshot_environment: WorldEnvironment
-
-var _socket_compositor: SocketCompositorEffect
-
-var _proxies: Array[Node2D]
-
 var _snapshot_queued: bool = false
 
 var _advance_frame_queued: bool = false
+
+static var scenario: RID
+
+static var compositor: RID
+
+static var socket_compositor_effect: SocketCompositorEffect
+
+static var environment: RID
+
+static var currently_active_generators: Array[SnapshotGenerator]
+
+static var current_generator_index: int
+
+
+static func _static_init() -> void:
+	socket_compositor_effect = SocketCompositorEffect.new()
+	
+	socket_compositor_effect.effect_callback_type = CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
+	
+	compositor = RenderingServer.compositor_create()
+	
+	RenderingServer.compositor_set_compositor_effects(compositor, [socket_compositor_effect.get_rid()])
+	
+	scenario = RenderingServer.scenario_create()
+	
+	RenderingServer.scenario_set_compositor(scenario, compositor)
+	
+	environment = RenderingServer.environment_create()
+	
+	RenderingServer.environment_set_background(environment, RenderingServer.ENV_BG_CANVAS)
+	
+	RenderingServer.scenario_set_environment(scenario, environment)
+
+
+static func _pre_draw_callback() -> void:
+	currently_active_generators.clear()
+	
+	current_generator_index = 0
+	
+	var all_snapshot_generators: Array[SnapshotGenerator] = _collect_all_snapshot_generators()
+	
+	for snapshot_generator in all_snapshot_generators:
+		if snapshot_generator._snapshot_viewport.render_target_update_mode == SubViewport.UPDATE_ONCE:
+			currently_active_generators.append(snapshot_generator)
+	
+	_queue_next_snapshot_callbacks()
+
+
+static func _render_callback(
+	render_size: Vector2i,
+	rd_instance: RenderingDeviceInstance,
+	scene_buffers: RenderSceneBuffersRD,
+	scene_data: RenderSceneDataRD,
+	snapshot_generator: SnapshotGenerator
+) -> void:
+	assert(
+		scene_buffers.get_render_target() == RenderingServer.viewport_get_render_target(snapshot_generator._snapshot_viewport.get_Viewport_rid()),
+		"something went wrong, the current render target of the compositor callback does not match the predicted snapshot"
+	)
+	
+	snapshot_generator._render(render_size, rd_instance, scene_buffers, scene_data)
+	
+	snapshot_generator._post_render_teardown()
+	
+	_queue_next_snapshot_callbacks()
+
+
+static func _queue_next_snapshot_callbacks() -> void:
+	if current_generator_index < currently_active_generators.size():
+		var next_snapshot_generator: SnapshotGenerator = currently_active_generators[current_generator_index]
+		
+		next_snapshot_generator._pre_render_setup()
+		
+		socket_compositor_effect.render_callback.connect(_render_callback.bind(next_snapshot_generator), CONNECT_ONE_SHOT)
+		
+		current_generator_index += 1
+
+
+static func _collect_all_snapshot_generators(root: Node = Engine.get_main_loop().root) -> Array[SnapshotGenerator]:
+	var ret: Array[SnapshotGenerator]
+	
+	for child in root.get_children():
+		ret.append_array(_collect_all_snapshot_generators(child))
+	
+	if root is SnapshotGenerator:
+		ret = [root]
+	
+	return ret
 
 
 func _notification(what: int) -> void:
@@ -122,11 +208,15 @@ func _ready() -> void:
 	
 	_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	
-	# HACK @sphynx-owner: necessary so that the socket compositor is dedicated to that viewport only,
-	# otherwise triggered for the root viewport as well.
-	_snapshot_viewport.own_world_3d = true
+	_snapshot_viewport.canvas_cull_mask = 1 << (2 - 1)
+	
+	_snapshot_viewport.world_2d = get_viewport().world_2d
+	
+	get_viewport().canvas_cull_mask = ~(1 << (2 - 1))
 	
 	add_child(_snapshot_viewport)
+	
+	RenderingServer.viewport_set_scenario(_snapshot_viewport.get_viewport_rid(), scenario)
 	
 	_snapshot_camera = Camera2D.new()
 	
@@ -140,20 +230,6 @@ func _ready() -> void:
 	
 	atlas_texture_2d = Texture2DRD.new()
 	
-	_snapshot_environment = WorldEnvironment.new()
-	
-	_snapshot_environment.environment = Environment.new()
-	
-	_snapshot_environment.environment.background_mode = Environment.BG_CANVAS
-	
-	_snapshot_environment.compositor = Compositor.new()
-	
-	_socket_compositor = SocketCompositorEffect.new()
-	
-	_snapshot_environment.compositor.compositor_effects = [_socket_compositor]
-	
-	_snapshot_viewport.add_child(_snapshot_environment)
-	
 	_update_viewport()
 	_update_atlas_texture()
 	_update_atlas_frames()
@@ -163,59 +239,13 @@ func _process(delta: float) -> void:
 	if DisplayServer.get_name() == "headless":
 		return
 	
-	for proxy in _proxies:
-		_snapshot_viewport.remove_child(proxy)
-		
-		proxy.queue_free()
-	
-	_proxies = []
-	
 	if _snapshot_queued:
 		_snapshot_queued = false
 		
-		for target in targets:
-			if !target:
-				continue
-			
-			# HACK @sphynx-owner: set the owner to null temporarily to avoid runtime
-			# errors regarding invalid owner on the duplicated nodes.
-			var temp_owner: Node = target.owner
-			
-			target.owner = null
-			
-			var new_proxy: Node = target.duplicate(16)
-			
-			target.owner = temp_owner
-			
-			for child in new_proxy.get_children():
-				new_proxy.remove_child(child)
-				
-				child.queue_free()
-			
-			_proxies.push_back(new_proxy)
-			
-			_snapshot_viewport.add_child(new_proxy)
-			
-			new_proxy.global_transform = target.global_transform
-			
-			# HACK @sphynx-owner: For some reason in the editor the camera position does not update no matter what
-			# I try. I don't know what the solution is for it but this is the workaround. If the camera won't come
-			# to the target, the targets would come to the camera.
-			if Engine.is_editor_hint():
-				new_proxy.global_position -= get_pivot_position()
-				new_proxy.global_position += Vector2(snapshot_rect.size) / 2.0 - Vector2(snapshot_rect.get_center())
-				new_proxy.global_position *= snapshot_resolution_scale
-				new_proxy.scale *= snapshot_resolution_scale
-			
-			new_proxy.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
-		
-		_snapshot_camera.global_position = get_pivot_position() + Vector2(snapshot_rect.get_center())
-		
 		_snapshot_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		
-		# HACK @sphynx-owner: can happen in the editor for example when not in the 2D editor view. 
-		if !_socket_compositor.render_callback.is_connected(_on_compositor_render_callback):
-			_socket_compositor.render_callback.connect(_on_compositor_render_callback, CONNECT_ONE_SHOT)
+		if !RenderingServer.frame_pre_draw.is_connected(_pre_draw_callback):
+			RenderingServer.frame_pre_draw.connect(_pre_draw_callback)
 
 
 func queue_snapshot(advance_frame: bool = true) -> void:
@@ -293,7 +323,41 @@ func _update_atlas_frames():
 		_current_frame = 0
 
 
-func _on_compositor_render_callback(
+func _pre_render_setup() -> void:
+	for target in targets:
+		if !target:
+			continue
+		
+		target.set_meta(PAST_STATE_META_KEY, {
+			"visibility_layer": target.visibility_layer,
+			"top_level": target.top_level,
+			"global_transform": target.global_transform,
+			"physics_interpolation_mode": target.physics_interpolation_mode
+		})
+		
+		target.set_visibility_layer_bit(SNAPSHOT_VISIBILITY_LAYER_BIT, true)
+		
+		var temp_global_transform: Transform2D = target.global_transform
+		
+		target.top_level = true
+		
+		target.global_transform = temp_global_transform
+		
+		# HACK @sphynx-owner: For some reason in the editor the camera position does not update no matter what
+		# I try. I don't know what the solution is for it but this is the workaround. If the camera won't come
+		# to the target, the targets would come to the camera.
+		if Engine.is_editor_hint():
+			target.global_position -= get_pivot_position()
+			target.global_position += Vector2(snapshot_rect.size) / 2.0 - Vector2(snapshot_rect.get_center())
+			target.global_position *= snapshot_resolution_scale
+			target.scale *= snapshot_resolution_scale
+		
+		target.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	
+	_snapshot_camera.global_position = get_pivot_position() + Vector2(snapshot_rect.get_center())
+
+
+func _render(
 	render_size: Vector2i,
 	rd_instance: RenderingDeviceInstance,
 	scene_buffers: RenderSceneBuffersRD,
@@ -304,6 +368,19 @@ func _on_compositor_render_callback(
 	if _advance_frame_queued:
 		_advance_frame_queued = false
 		_current_frame = (_current_frame + 1 + frame_count) % frame_count
+
+
+func _post_render_teardown() -> void:
+	for target in targets:
+		if !target:
+			continue
+		
+		var past_state: Dictionary = target.get_meta(PAST_STATE_META_KEY)
+		
+		target.remove_meta(PAST_STATE_META_KEY)
+		
+		for state in past_state.keys():
+			target.set(state, past_state[state])
 
 
 # returns the atlas frame that we rendered to
