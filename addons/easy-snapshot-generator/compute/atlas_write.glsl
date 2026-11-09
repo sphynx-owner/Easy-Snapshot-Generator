@@ -11,7 +11,7 @@ layout(push_constant, std430) uniform Params
 	int h_frames;
 	int v_frames;
 	int current_frame;
-	int pad1;
+	int correct_srgb;
 } params;
 
 
@@ -32,5 +32,11 @@ void main()
 
 	ivec2 uvi_offset = atlas_offset * render_size;
 
-	imageStore(output_color_image, uvi + uvi_offset, texelFetch(snapshot, uvi, 0));
+	vec4 color = texelFetch(snapshot, uvi, 0);
+
+	if (bool(params.correct_srgb)) {
+		color.rgb = pow(color.rgb, vec3(1.0 / 2.1));
+	}
+
+	imageStore(output_color_image, uvi + uvi_offset, color);
 }

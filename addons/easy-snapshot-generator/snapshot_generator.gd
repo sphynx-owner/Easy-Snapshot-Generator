@@ -48,6 +48,13 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 		
 		_snapshot_rect_updated()
 
+@export var srgb_correct: bool = true
+
+## When using [method fit_snapshot_rect_to_targets] adds padding to the final rect
+@export var fit_margin: int = 5
+
+@export_tool_button("fit snapshot rect to targets") var fit_rect = fit_snapshot_rect_to_targets
+
 static var _rd_instance: RenderingDeviceInstance
 
 static var _atlas_write_shader_stage: CompiledShaderStage
@@ -244,6 +251,30 @@ func get_latest_frame() -> int:
 	return get_current_frame(-1)
 
 
+func fit_snapshot_rect_to_targets() -> void:
+	var final_rect: Rect2
+	
+	var pivot_position: Vector2 = get_pivot_position()
+	
+	for target in targets:
+		if target is Sprite2D:
+			var target_rect: Rect2 = target.get_rect()
+			
+			target_rect = target.global_transform * target_rect
+			
+			target_rect.position -= pivot_position
+			
+			if !final_rect:
+				final_rect = target_rect
+				
+			else:
+				final_rect = final_rect.merge(target_rect)
+	
+	final_rect = final_rect.grow(fit_margin)
+	
+	snapshot_rect = Rect2i(final_rect)
+
+
 func _atlas_dimensions_updated() -> void:
 	_update_atlas_texture()
 	_update_atlas_frames()
@@ -326,7 +357,7 @@ func _render_thread_generate_snapshot(render_size: Vector2i, scene_buffers: Rend
 			atlas_dimensions.x,
 			atlas_dimensions.y,
 			current_frame,
-			0,
+			srgb_correct,
 		]),
 		EasyRenderingUtils.get_groups_count(Vector3i(snapshot_size.x, snapshot_size.y, 1), Vector3i(16, 16, 1))
 	)
