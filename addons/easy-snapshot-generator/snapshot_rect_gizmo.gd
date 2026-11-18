@@ -16,7 +16,7 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	if !node or !EditorInterface.get_selection().get_selected_nodes().has(node):
+	if !node or !Engine.get_singleton("EditorInterface").get_selection().get_selected_nodes().has(node):
 		return
 	
 	var rect: Rect2i = node.get(SNAPSHOT_RECT_PROPERTY)

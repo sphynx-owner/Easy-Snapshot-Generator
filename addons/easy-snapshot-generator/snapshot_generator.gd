@@ -53,6 +53,10 @@ const ATLAS_WRITE_SHADER_PATH: String = "res://addons/easy-snapshot-generator/co
 ## When using [method fit_snapshot_rect_to_targets] adds padding to the final rect
 @export var fit_margin: int = 5
 
+## When using [method fit_snapshot_rect_to_targets] enlarges the final rect to be centerd around the pivot
+## position. Can be used for generation of multimesh-friendly textures
+@export var fit_force_centered: bool = false
+
 @export_tool_button("fit snapshot rect to targets") var fit_rect = fit_snapshot_rect_to_targets
 
 static var _rd_instance: RenderingDeviceInstance
@@ -269,6 +273,9 @@ func fit_snapshot_rect_to_targets() -> void:
 				
 			else:
 				final_rect = final_rect.merge(target_rect)
+	
+	if fit_force_centered:
+		final_rect.size = (pivot_position - final_rect.position) * 2 
 	
 	final_rect = final_rect.grow(fit_margin)
 	
